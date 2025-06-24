@@ -1,75 +1,131 @@
 import pandas as pd
-from datetime import datetime, timedelta
+import numpy as np
+from datetime import datetime
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
 
 class PredictionModel:
+
     def __init__(self):
-        pass
+        self.model = Pipeline([
+            ('scaler', StandardScaler()),
+            ('regressor', RandomForestRegressor(
+                n_estimators=200,
+                max_depth=15,
+                min_samples_split=5,
+                min_samples_leaf=2,
+                random_state=42,
+                n_jobs=-1,
+                verbose=1
+            ))
+        ])
+        self.features = [
+            'hour', 'minute_interval', 'dayofweek', 'month',
+            'O_lat', 'O_lng', 'D_lat', 'D_lng',
+            'O_SPEED', 'D_SPEED', 'OD_Dis_km',
+            'avg_speed', 'distance_category'
+        ]
+        self.time_interval = 15
+        self.is_trained = False
 
-    def predict_demand(self, historical_data: pd.DataFrame, time_period: str):
-        """
-        预测特定时间和地点的乘客需求。
-        historical_data: 包含历史订单数据，至少包括时间、上车地点等信息。
-        time_period: 预测的时间段，例如 'hourly', 'daily'。
-        """
-        print(f"正在预测 {time_period} 的乘客需求...")
-        
-        if historical_data.empty or 'O_time' not in historical_data.columns:
-            print("历史数据为空或缺少'O_time'列，无法进行需求预测。")
-            return pd.DataFrame(columns=['time_unit', 'demand'])
+    def _enhance_features(self, df):
+        """更鲁棒的特征工程"""
+        # 基础特征
+        features = {
+            'hour': df['O_time'].dt.hour,
+            'minute_interval': (df['O_time'].dt.minute // 15) * 15,
+            'dayofweek': df['O_time'].dt.dayofweek,
+            'month': df['O_time'].dt.month,
+            'O_lat': df['O_lat'],
+            'O_lng': df['O_lng'],
+            'D_lat': df['D_lat'],
+            'D_lng': df['D_lng'],
+            'OD_Dis_km': df.get('OD_Dis_km', 0),
+            'speed_ratio': df['O_SPEED'] / (df['D_SPEED'] + 1e-5)  # 避免除零
+        }
 
-        # 确保 'O_time' 是 datetime 类型
-        historical_data['O_time'] = pd.to_datetime(historical_data['O_time'])
+        # 添加方向向量
+        features.update({
+            'lat_diff': df['D_lat'] - df['O_lat'],
+            'lng_diff': df['D_lng'] - df['O_lng']
+        })
 
-        if time_period == 'hourly':
-            historical_data['time_unit'] = historical_data['O_time'].dt.hour
-            demand_by_unit = historical_data.groupby('time_unit').size().reset_index(name='demand')
-            # 填充所有小时，确保0-23小时都有数据，没有数据的填充0
-            all_hours = pd.DataFrame({'time_unit': range(24)})
-            demand_by_unit = pd.merge(all_hours, demand_by_unit, on='time_unit', how='left').fillna(0)
-            demand_by_unit['demand'] = demand_by_unit['demand'].astype(int)
-            print("按小时预测需求完成。")
-            return demand_by_unit
-        elif time_period == 'daily':
-            historical_data['time_unit'] = historical_data['O_time'].dt.date
-            demand_by_unit = historical_data.groupby('time_unit').size().reset_index(name='demand')
-            print("按天预测需求完成。")
-            return demand_by_unit
-        else:
-            print(f"不支持的时间粒度: {time_period}。目前只支持 'hourly' 和 'daily'。")
-            return pd.DataFrame(columns=['time_unit', 'demand'])
+        # 构建DataFrame
+        X = pd.DataFrame(features)
 
-    def predict_eta(self, start_location: tuple, end_location: tuple, current_time: datetime):
-        """
-        预测出租车从起点到终点的预计到达时间（ETA）。
-        start_location: 起点坐标 (经度, 纬度)。
-        end_location: 终点坐标 (经度, 纬度)。
-        current_time: 当前时间。
-        """
-        print(f"正在预测从 {start_location} 到 {end_location} 的ETA...")
-        
-        # 引入DataAnalyzer来计算距离
-        from data_analyzer import DataAnalyzer
-        analyzer = DataAnalyzer()
-        distance_km = analyzer.haversine(start_location[0], start_location[1], end_location[0], end_location[1])
-        
-        if distance_km < 0.01: # 如果距离非常近，ETA接近0
-            return "不足 1 分钟"
+        # 添加距离分类
+        X['dist_type'] = pd.cut(
+            X['OD_Dis_km'],
+            bins=[0, 3, 10, float('inf')],
+            labels=['short', 'medium', 'long']
+        )
+        X = pd.get_dummies(X, columns=['dist_type'], prefix='dist')
 
-        # 根据时间调整平均速度 (km/h)
-        # 这是一个简化的模型，实际应考虑实时交通、路况等
-        hour = current_time.hour
-        if 6 <= hour < 9: # 早高峰
-            avg_speed_kmh = 20
-        elif 17 <= hour < 20: # 晚高峰
-            avg_speed_kmh = 18
-        elif 22 <= hour or hour < 5: # 夜间
-            avg_speed_kmh = 40
-        else: # 平峰
-            avg_speed_kmh = 30
-            
-        avg_speed_mps = avg_speed_kmh * 1000 / 3600 # 转换为米/秒
+        return X
 
-        time_seconds = (distance_km * 1000) / avg_speed_mps
-        eta_minutes = time_seconds / 60
-        
-        return f"{eta_minutes:.2f} 分钟"
+    def fit(self, od_data):
+        """改进的训练方法"""
+        df = od_data.copy()
+
+        # 检查数据是否包含有效的订单计数
+        if 'order_count' not in df.columns:
+            # 如果没有order_count列，尝试从O_FLAG/D_FLAG推断
+            if 'O_FLAG' in df.columns and 'D_FLAG' in df.columns:
+                # 假设O_FLAG=1表示订单开始，D_FLAG=1表示订单结束
+                df['order_count'] = df['O_FLAG']  # 或使用其他逻辑
+            else:
+                # 如果无法推断，则不能进行有监督学习
+                raise ValueError(
+                    "数据必须包含order_count列或O_FLAG/D_FLAG列"
+                    "用于确定订单数量"
+                )
+
+        # 验证目标变量
+        if df['order_count'].nunique() == 1:
+            # 如果所有值相同，改为使用行程距离或时间作为目标变量
+            print("警告: order_count无变化，改为预测OD_TIME_s")
+            df['order_count'] = df['OD_TIME_s']  # 或其他有变化的变量
+
+        # 特征工程
+        X = self._enhance_features(df)
+        y = df['order_count']
+
+        # 模型训练
+        self.model.fit(X, y)
+        self.is_trained = True
+        self.feature_names_ = X.columns.tolist()
+
+    def predict_od_orders(self, start_date, od_data):
+        """改进的预测方法"""
+        if not self.is_trained:
+            return {"error": "模型未训练"}
+
+        try:
+            df = od_data.copy()
+            df['O_time'] = pd.to_datetime(start_date)
+
+            # 确保包含必要的列
+            if 'OD_TIME_s' not in df.columns:
+                df['OD_TIME_s'] = 0  # 默认值
+
+            X_predict = self._enhance_features(df)
+            X_predict = X_predict[self.feature_names_]
+
+            predictions = self.model.predict(X_predict)
+
+            # 根据训练目标返回适当结果
+            if hasattr(self, 'predict_order_count'):
+                return {
+                    "time": start_date.strftime("%Y-%m-%d"),
+                    "predictions": [max(0, round(p)) for p in predictions],
+                    "units": "order_count"
+                }
+            else:
+                return {
+                    "time": start_date.strftime("%Y-%m-%d"),
+                    "predictions": predictions.tolist(),
+                    "units": "OD_TIME_s (seconds)"
+                }
+        except Exception as e:
+            return {"error": str(e)}

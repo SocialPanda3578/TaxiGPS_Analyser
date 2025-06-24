@@ -1,7 +1,5 @@
 import pandas as pd
 import os
-import numpy as np
-from sklearn.cluster import DBSCAN
 from datetime import datetime, timedelta
 import math
 from sklearn.cluster import DBSCAN
@@ -158,32 +156,44 @@ class DataAnalyzer:
 
         return hourly_speed
 
-    def count_occupied_taxis(self, od_data):
-        """统计载客出租车的数量"""
-        # 创建时间范围
-        min_time = od_data['O_time'].min().replace(hour=0, minute=0, second=0)
-        max_time = min_time + timedelta(days=1)
-        time_range = pd.date_range(start=min_time, end=max_time, freq='1min')
+    def count_occupied_taxis(self, od_data, freq='1min'):
+        """统计每分钟载客出租车数量（支持多车辆）"""
+        import datetime
+        today = datetime.datetime.now().date()
+        od_data['O_time'] = od_data['O_time'].apply(
+            lambda x: datetime.datetime.combine(today, x.time())
+        )
+        od_data['D_time'] = od_data['D_time'].apply(
+            lambda x: datetime.datetime.combine(today, x.time())
+        )
 
-        # 初始化结果DataFrame
-        occupied_count = pd.DataFrame(index=time_range)
-        occupied_count['number'] = 0
+        # 2. 动态生成时间范围（覆盖所有订单）
+        min_time = od_data['O_time'].min().floor(freq)  # 向下取整到分钟
+        max_time = od_data['D_time'].max().ceil(freq)   # 向上取整到分钟
+        time_range = pd.date_range(start=min_time, end=max_time, freq=freq)
 
-        # 对每个OD对，计算载客时间段内的出租车数量
-        for _, row in od_data.iterrows():
-            start_time = row['O_time']
-            end_time = row['D_time']
+        # 3. 初始化计数DataFrame
+        occupied_count = pd.DataFrame(index=time_range, data={'number': 0})
 
-            # 确保时间在范围内
-            if start_time in occupied_count.index and end_time in occupied_count.index:
-                # 在载客时间段内增加计数
-                occupied_count.loc[start_time:end_time, 'number'] += 1
+        # 4. 按车辆分组处理载客时段
+        for taxi_id, group in od_data.groupby('O_COMMADDR'):
+            # 合并同一车辆的连续/重叠载客时段
+            intervals = []
+            for _, row in group.sort_values('O_time').iterrows():
+                start, end = row['O_time'], row['D_time']
+                if intervals and start <= intervals[-1][1]:
+                    # 重叠时段，合并（延长结束时间）
+                    intervals[-1] = (intervals[-1][0], max(end, intervals[-1][1]))
+                else:
+                    intervals.append((start, end))
 
-        # 重置索引，将时间作为列
-        occupied_count = occupied_count.reset_index()
-        occupied_count.columns = ['TIME', 'number']
+            # 标记载客时段（累加计数）
+            for start, end in intervals:
+                mask = (occupied_count.index >= start) & (occupied_count.index < end)
+                occupied_count.loc[mask, 'number'] += 1
 
-        return occupied_count
+        # 5. 重置索引并返回
+        return occupied_count.reset_index().rename(columns={'index': 'TIME'})
 
     def analyze_trip_distance(self, od_data):
         """分析出行距离分布"""
