@@ -1,19 +1,14 @@
-from datetime import datetime
-
+import os
 import gradio as gr
 import matplotlib.pyplot as plt
-import os
 
-# 导入自定义模块
 from data_cleaner import DataCleaner
 from data_analyzer import DataAnalyzer
 from data_visualizer import DataVisualizer
 from prediction_model import PredictionModel
 
-# 设置matplotlib中文字体
 plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']
 plt.rcParams['axes.unicode_minus'] = False
-
 
 class TaxiGPSAnalyzer:
     def __init__(self):
@@ -60,10 +55,7 @@ class TaxiGPSAnalyzer:
         print("距离分析完成")
 
         # 乘客需求预测
-        #print(od_data.head().to_dict())
-        self.predictor.fit(od_data)
-        predict_data = self.predictor.predict_od_orders(datetime(1900, 1, 1) , od_data)
-        # print(predict_data)
+        demand_prediction = self.predictor.predict_demand(od_data, 'hourly')
         print("乘客需求预测完成")
 
         # 订单特征分析
@@ -72,7 +64,7 @@ class TaxiGPSAnalyzer:
 
         # 订单预测
         order_predictions = self.analyzer.predict_orders(od_data)
-        print("订单特征分析完成")
+        print("订单特征预测完成")
 
 
         # 生成可视化结果
@@ -94,8 +86,8 @@ class TaxiGPSAnalyzer:
         distance_plot_path = os.path.join(temp_dir, "distance_plot.png")
         self.visualizer.plot_distance_distribution(distance_data, distance_plot_path)
 
-        #demand_plot_path = os.path.join(temp_dir, "demand_plot.png")
-        #self.visualizer.plot_demand_prediction(demand_prediction, demand_plot_path)
+        demand_plot_path = os.path.join(temp_dir, "demand_plot.png")
+        self.visualizer.plot_demand_prediction(demand_prediction, demand_plot_path)
 
         prediction_heatmap_path = os.path.join(temp_dir, "prediction_heatmap.png")
         self.visualizer.plot_order_prediction_summary(order_predictions, prediction_heatmap_path)
@@ -112,19 +104,19 @@ class TaxiGPSAnalyzer:
             "热点簇数量": n_clusters,
             "平均行程距离": f"{od_data['OD_Dis_km'].mean():.2f} km",
             "平均行程时间": f"{od_data['OD_TIME_s'].mean() / 60:.2f} 分钟",
-            "平均行驶速度": f"{od_data['OD_Dis_km'].sum() / (od_data['OD_TIME_s'].sum() / 3600):.2f} km/h",
+            "平均行驶速度": f"{od_data['OD_Dis_km'].sum() / (od_data['OD_TIME_s'].sum() / 3600):.2f} km/h"
         }
 
         # 确保所有图像都存在
         for path in [
             gps_plot_path, hotspots_plot_path, time_plot_path,
             speed_plot_path, occupied_plot_path, distance_plot_path,
-            '''demand_plot_path''', order_heatmap_path, prediction_heatmap_path
+            demand_plot_path, order_heatmap_path, prediction_heatmap_path
         ]:
             if not os.path.exists(path):
                 print(f"警告: 文件不存在: {path}")
 
-        return summary, gps_plot_path, hotspots_plot_path, time_plot_path, speed_plot_path, occupied_plot_path, distance_plot_path, '''demand_plot_path''', order_heatmap_path, prediction_heatmap_path
+        return summary, gps_plot_path, hotspots_plot_path, time_plot_path, speed_plot_path, occupied_plot_path, distance_plot_path, demand_plot_path, order_heatmap_path, prediction_heatmap_path
 
 def create_interface():  # Gradio
     analyzer = TaxiGPSAnalyzer()
@@ -184,7 +176,6 @@ def create_interface():  # Gradio
         )
 
     return iface
-
 
 if __name__ == "__main__":
     iface = create_interface()

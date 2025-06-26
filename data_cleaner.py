@@ -3,7 +3,6 @@ import geopandas as gpd
 import numpy as np
 from shapely.geometry import Point
 import os
-from datetime import datetime
 
 class DataCleaner:
     def load_data(self, file_path):

@@ -1,6 +1,5 @@
 import pandas as pd
 import os
-from datetime import datetime, timedelta
 import math
 from sklearn.cluster import DBSCAN
 import geopandas as gpd
@@ -43,7 +42,6 @@ class DataAnalyzer:
                 # 使用哈弗辛公式计算两点间距离
                 distance = self.haversine(pickup['long'], pickup['lati'],
                                           dropoff['long'], dropoff['lati'])
-
                 # 确保距离为正，否则跳过此OD对
                 if distance <= 0:
                     continue
@@ -67,14 +65,12 @@ class DataAnalyzer:
                 }
 
                 od_pairs.append(od_pair)
-
         return pd.DataFrame(od_pairs)
 
     def haversine(self, lon1, lat1, lon2, lat2):
         """计算两点间的距离(千米)"""
         # 将经纬度转换为弧度
         lon1, lat1, lon2, lat2 = map(math.radians, [lon1, lat1, lon2, lat2])
-
         # 哈弗辛公式
         dlon = lon2 - lon1
         dlat = lat2 - lat1
@@ -123,7 +119,6 @@ class DataAnalyzer:
                         'count': count,
                         'time': f"{hour:02d}:00"
                     })
-
         return pd.DataFrame(hotspots), n_clusters
 
     def analyze_time_distribution(self, od_data, interval='15min'):
@@ -131,14 +126,11 @@ class DataAnalyzer:
         # 确保时间列是datetime类型
         if not pd.api.types.is_datetime64_dtype(od_data['O_time']):
             od_data.loc[:, 'O_time'] = pd.to_datetime(od_data['O_time'])
-
         # 设置时间索引
         od_time_indexed = od_data.set_index('O_time')
-
         # 按指定时间间隔重采样并计数
         time_distribution = od_time_indexed.resample(interval).size().reset_index()
         time_distribution.columns = ['O_time', 'count']
-
         return time_distribution
 
     def calculate_average_speed(self, od_data):
@@ -153,7 +145,6 @@ class DataAnalyzer:
         od_data.loc[:, 'hour'] = od_data['O_time'].dt.hour
         hourly_speed = od_data.groupby('hour')['avg_speed'].mean().reset_index()
         hourly_speed.columns = ['O_time', 'sudu']
-
         return hourly_speed
 
     def count_occupied_taxis(self, od_data, freq='1min'):
@@ -191,8 +182,6 @@ class DataAnalyzer:
             for start, end in intervals:
                 mask = (occupied_count.index >= start) & (occupied_count.index < end)
                 occupied_count.loc[mask, 'number'] += 1
-
-        # 5. 重置索引并返回
         return occupied_count.reset_index().rename(columns={'index': 'TIME'})
 
     def analyze_trip_distance(self, od_data):
@@ -213,7 +202,6 @@ class DataAnalyzer:
 
         # 重置索引
         distance_stats = distance_stats.reset_index()
-
         return distance_stats
 
     def get_region(self, lng, lat, region_data):

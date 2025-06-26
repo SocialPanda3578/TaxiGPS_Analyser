@@ -113,20 +113,16 @@ class DataVisualizer:
 
     def plot_time_distribution(self, time_dist_df, save_path=None):
         """绘制时间分布图"""
-        fig, ax = plt.subplots(figsize=(10, 6))  # 调整为更适合时间分布的尺寸
-
-        # 转换时间格式为字符串，便于显示
+        fig, ax = plt.subplots(figsize=(10, 6))
         time_labels = time_dist_df['O_time'].dt.strftime('%H:%M')
 
         ax.bar(range(len(time_dist_df)), time_dist_df['count'], color='skyblue')
         ax.set_xticks(range(0, len(time_dist_df), max(1, len(time_dist_df) // 24)))
         ax.set_xticklabels(time_labels[::max(1, len(time_dist_df) // 24)], rotation=45)
-
         plt.title('乘客打车时间分布')
         plt.xlabel('时间')
         plt.ylabel('打车次数')
         plt.tight_layout()
-
         if save_path:
             plt.savefig(save_path)
         plt.close()
@@ -138,7 +134,7 @@ class DataVisualizer:
 
         ax.plot(speed_df['O_time'], speed_df['sudu'], 'o-', color='green', linewidth=2)
         ax.set_xticks(range(24))
-        ax.set_xticklabels([f"{h:02d}:00" for h in range(24)])
+        ax.set_xticklabels([f"{h:02d}:00" for h in range(24)], rotation=45)
 
         plt.title('城市道路平均速度变化')
         plt.xlabel('时间')
@@ -215,7 +211,6 @@ class DataVisualizer:
     def plot_demand_prediction(self, demand_df, save_path=None):
         """
         绘制乘客需求预测的时间分布图。
-        demand_df: 包含预测需求的数据框，至少包括'hour'和'demand'列。
         """
         if demand_df.empty:
             fig, ax = plt.subplots(figsize=self.default_figsize)
@@ -228,14 +223,13 @@ class DataVisualizer:
         fig, ax = plt.subplots(figsize=self.default_figsize)
         ax.plot(demand_df['time_unit'], demand_df['demand'], 'o-', color='purple', linewidth=2)
         ax.set_xticks(range(24))
-        ax.set_xticklabels([f"{h:02d}:00" for h in range(24)])
+        ax.set_xticklabels([f"{h:02d}:00" for h in range(24)], rotation=45)
 
         plt.title('乘客需求预测 (按小时)')
         plt.xlabel('小时')
         plt.ylabel('预测需求量')
         plt.grid(True, linestyle='--', alpha=0.7)
         plt.tight_layout()
-
         if save_path:
             plt.savefig(save_path)
         plt.close()
